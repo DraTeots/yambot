@@ -1,0 +1,27 @@
+# Project 1 — "input-tracker".
+#
+# A small command-line program that:
+#   * listens to your real mouse + keyboard using evdev (Linux input layer),
+#   * logs which mouse button was pressed and an *estimated* cursor position,
+#   * logs every keyboard key press,
+#   * when you press the "1" key, moves the pointer to the middle of the screen
+#     and performs a right-click (done by creating a virtual mouse via uinput).
+#
+# A "crate" is one Rust package. This file describes it and its dependencies.
+[package]
+name = "input-tracker"
+version = "0.1.0"
+edition = "2021"          # the Rust "edition" (language flavour). 2021 is the common, stable choice.
+
+[dependencies]
+# evdev: the most widely used pure-Rust library for reading Linux input devices
+# (/dev/input/event*) and for creating virtual input devices through uinput.
+# "uinput" feature is what lets us *emit* events (move mouse / click).
+evdev = "0.13.2"
+
+# opencv: Rust bindings to the system OpenCV library. We use it to read a
+# screenshot (imgcodecs) and template-match the button inside it (imgproc).
+# `default-features = false` keeps only those two modules so the build doesn't
+# generate bindings for OpenCV's dozens of other modules. Needs system OpenCV +
+# clang/libclang installed (on Arch: `pacman -S opencv clang`).
+opencv = { version = "0.99.0", default-features = false, features = ["imgcodecs", "imgproc"] }

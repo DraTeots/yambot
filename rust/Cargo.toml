@@ -1,0 +1,28 @@
+# ============================================================================
+#  Cargo WORKSPACE
+#  ----------------------------------------------------------------------------
+#  A "workspace" is one folder that holds several related Rust programs
+#  ("crates"). They build together, share one ./target output folder and one
+#  Cargo.lock. This is the "multi-project" setup.
+#
+#  Common commands (run from inside this `rust/` folder):
+#    cargo build                 # build everything
+#    cargo run -p input-tracker  # run project 1 (needs input-group access, see README)
+#    cargo run -p gui            # run project 2 (the GUI window)
+#
+#  Docs: https://doc.rust-lang.org/cargo/reference/workspaces.html
+# ============================================================================
+[workspace]
+resolver = "2"
+members = [
+    "input-tracker", # project 1: reads mouse/keyboard via evdev, injects clicks via uinput
+    "gui",           # project 2: egui desktop app (based on emilk/eframe_template)
+]
+
+# With two programs in the workspace, a bare `cargo run` / `cargo build` is
+# ambiguous. `default-members` picks the default target: the GUI (it needs no
+# special permissions). So:
+#   cargo run                     -> runs `gui`
+#   cargo run -p input-tracker    -> runs project 1 explicitly
+#   cargo build --workspace       -> builds BOTH (the `--workspace` flag overrides this default)
+default-members = ["gui"]

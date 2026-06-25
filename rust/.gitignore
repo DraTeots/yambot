@@ -1,0 +1,2 @@
+# Rust build output (one shared target/ for the whole workspace).
+/target

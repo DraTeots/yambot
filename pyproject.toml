@@ -1,0 +1,17 @@
+[project]
+name = "yambot"
+version = "0.1.0"
+description = "Screenshot-driven autoclicker for My Singing Monsters on Linux/Wayland"
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-python",
+    "numpy",
+    "evdev",
+]
+
+[project.scripts]
+yambot = "yambot:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

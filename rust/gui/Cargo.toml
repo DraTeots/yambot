@@ -1,0 +1,27 @@
+# Project 2 — "gui".
+#
+# A small desktop window built with egui/eframe, based on the structure of
+# emilk/eframe_template (https://github.com/emilk/eframe_template). The template
+# also supports building for the web (wasm); we trimmed that out to keep things
+# simple — this is a native Linux app only.
+#
+#   * left panel  : 3 buttons (the panel's width can be dragged)
+#   * central panel: a scrolling, terminal-like log
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"      # matches the eframe_template; needs a recent Rust (we have 1.96)
+
+[dependencies]
+# egui     = the immediate-mode GUI library (the widgets).
+# eframe   = the framework that opens a window and runs egui's event loop.
+#            "persistence" lets the app save/restore its state between runs.
+egui = "0.34.1"
+eframe = { version = "0.34.1", features = ["persistence"] }
+
+# log + env_logger: lets eframe/egui print diagnostic logs (run with RUST_LOG=debug).
+log = "0.4"
+env_logger = "0.11"
+
+# serde (with the "derive" feature) is what powers the save/restore of app state.
+serde = { version = "1", features = ["derive"] }
