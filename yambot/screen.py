@@ -13,10 +13,15 @@ import cv2
 import numpy as np
 
 #: Where a freshly grabbed full-screen frame is written by default.
-SHOT = Path("latest_screenshot.png")
+
+
 
 _PKG_DIR = Path(__file__).parent
 TEMPLATES_DIR = _PKG_DIR / "templates"
+
+VISUAL_LOG = Path("captures")
+SCREENSHOT_PATH = VISUAL_LOG / "screenshot.png"
+
 #: The button we hunt for each cycle. Ships inside the package.
 TEMPLATE_ISL_COLLECT_BUTTON = TEMPLATES_DIR / "collect_all.png"
 TEMPLATE_ISL_CLOSE_BUTTON = TEMPLATES_DIR / "close_button.png"
@@ -25,7 +30,7 @@ TEMPLATE_MAP_MAIN_PLANT = TEMPLATES_DIR / "main_01_plant.png"
 TEMPLATE_MAP_MAIN_COLD = TEMPLATES_DIR / "main_02_cold.png"
 TEMPLATE_MAP_MAIN_AIR = TEMPLATES_DIR / "main_03_air.png"
 
-def screenshot(path=SHOT):
+def screenshot(path=SCREENSHOT_PATH):
     """Capture the full screen via Spectacle, save to ``path``, return a BGR image.
 
     Spectacle is the KDE screen grabber; ``-b -n -f`` makes it run headless
@@ -45,7 +50,7 @@ def screenshot(path=SHOT):
     return img
 
 
-def find_on_image(image, template_path=TEMPLATE_ISL_COLLECT_BUTTON, threshold=0.80, scales=None):
+def find_on_image(image, template_path, threshold=0.80, scales=None):
     """Locate ``template_path`` inside ``image`` (BGR) by template matching.
 
     Sweeps a range of scales so a minified template still matches a larger

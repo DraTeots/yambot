@@ -11,10 +11,11 @@ screen, find the button, draw a circle on it for the record, then move the
 virtual mouse there and click. After each cycle we listen to the real keyboard
 and run another cycle when you press **1**; **q** or **Esc** quits.
 """
-
+import sys
 import time
 
 from evdev import ecodes as e
+import structlog
 
 from .keyboard import key_name, wait_for_keys
 from .mouse import VirtualMouse
@@ -28,6 +29,26 @@ SWITCH_DELAY = 5.0  # seconds to switch screens before a cycle fires
 REPEAT_KEY = e.KEY_1
 QUIT_KEYS = (e.KEY_Q, e.KEY_ESC)
 
+shared_processors = [
+    # Processors that have nothing to do with output,
+    # e.g., add timestamps or log level names.
+]
+if sys.stderr.isatty():
+    # Pretty printing when we run in a terminal session.
+    # Automatically prints pretty tracebacks when "rich" is installed
+    processors = shared_processors + [
+        structlog.dev.ConsoleRenderer(),
+    ]
+else:
+    # Print JSON when we run, e.g., in a Docker container.
+    # Also print structured tracebacks.
+    processors = shared_processors + [
+        structlog.processors.dict_tracebacks,
+        structlog.processors.JSONRenderer(),
+    ]
+structlog.configure(processors)
+
+logger = structlog.get_logger()
 
 def run_cycle(mouse, *, template=TEMPLATE_ISL_COLLECT_BUTTON, delay=SWITCH_DELAY, debug_dir=DEBUG_DIR):
     """Wait, screenshot, find the button, annotate it, then move + click."""
@@ -112,7 +133,8 @@ def run_map(mouse: VirtualMouse, *,  delay=SWITCH_DELAY, debug_dir=DEBUG_DIR):
     return True
 
 def main():
-    print("yambot: starting")
+
+    logger.info("yambot: starting")
     with VirtualMouse() as mouse:
         run_map(mouse)
         while True:
