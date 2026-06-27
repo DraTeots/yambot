@@ -19,7 +19,19 @@ MAP_ISLANDS_DIR = TEMPLATES_DIR / "map_islands"
 # --- UI buttons -----------------------------------------------------------
 TEMPLATE_ISL_COLLECT_BUTTON = TEMPLATES_DIR / "collect_all.png"
 TEMPLATE_ISL_CLOSE_BUTTON = TEMPLATES_DIR / "close_button.png"
+TEMPLATE_CONFIRM_BUTTON = TEMPLATES_DIR / "confirm_button.png"
 TEMPLATE_MAP_SEPARATOR: Path = TEMPLATES_DIR / "island_list_separator.png"
+
+# --- Friends list ---------------------------------------------------------
+# The list pager has back/next buttons that share a shape per direction and
+# differ only in tone (enabled vs. greyed), so each comes as an active/inactive
+# pair fed to check_is_active. The quick-light button only exists when there's
+# a torch to light — its absence is the signal, not a separate "off" image.
+TEMPLATE_FRIEND_BACK_ACTIVE = TEMPLATES_DIR / "friend_list_back_active_button.png"
+TEMPLATE_FRIEND_BACK_INACTIVE = TEMPLATES_DIR / "friend_list_back_inactive_button.png"
+TEMPLATE_FRIEND_NEXT_ACTIVE = TEMPLATES_DIR / "friend_list_next_active_button.png"
+TEMPLATE_FRIEND_NEXT_INACTIVE = TEMPLATES_DIR / "friend_list_next_inactive_button.png"
+TEMPLATE_FRIEND_QUICK_LIGHT = TEMPLATES_DIR / "friend_quick_light_active.png"
 
 # --- Map islands ----------------------------------------------------------
 # Keyed by island so callers read like the game's own labels. The numeric

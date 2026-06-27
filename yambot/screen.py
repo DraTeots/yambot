@@ -76,6 +76,96 @@ def find_on_image(image, template_path, threshold=0.80, scales=None):
     return x, y, width, height, score, is_ok
 
 
+def find_all_on_image(image, template_path, threshold=0.80, scales=None, max_results=50):
+    """Locate *every* occurrence of ``template_path`` inside ``image`` (BGR).
+
+    :func:`find_on_image` returns only the single best match (``minMaxLoc`` picks
+    one peak). When the same button repeats — e.g. a "fire" icon on each friend
+    card — we want them all. The repeated buttons are the same on-screen size, so
+    we first find the best scale (one quick sweep), then collect every peak at
+    that scale that clears ``threshold``.
+
+    Each real button lights up a whole cluster of neighboring pixels above
+    threshold, so after taking a peak we blank its template-sized neighborhood
+    before looking for the next — greedy non-maximum suppression. Returns a list
+    of ``(x, y, w, h, score)`` sorted strongest-first, capped at ``max_results``.
+    """
+    template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
+    if template is None:
+        raise FileNotFoundError(template_path)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    if scales is None:
+        scales = np.linspace(0.8, 2.5, 18)
+
+    # Pass 1: find the single best scale (assumes the repeats share one size).
+    th, tw = template.shape[:2]
+    best = None  # (score, w, h)
+    for s in scales:
+        w, h = int(tw * s), int(th * s)
+        if w < 8 or h < 8 or w > gray.shape[1] or h > gray.shape[0]:
+            continue
+        resized = cv2.resize(template, (w, h), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(gray, resized, cv2.TM_CCOEFF_NORMED)
+        _, score, _, _ = cv2.minMaxLoc(res)
+        if best is None or score > best[0]:
+            best = (score, w, h)
+
+    if best is None:
+        return []
+
+    # Pass 2: at the winning scale, harvest every peak above threshold.
+    _, w, h = best
+    resized = cv2.resize(template, (w, h), interpolation=cv2.INTER_AREA)
+    res = cv2.matchTemplate(gray, resized, cv2.TM_CCOEFF_NORMED)
+
+    matches = []
+    while len(matches) < max_results:
+        _, score, _, loc = cv2.minMaxLoc(res)
+        if score < threshold:
+            break
+        matches.append((loc[0] + w // 2, loc[1] + h // 2, w, h, float(score)))
+        # Suppress this button's neighborhood so the next iteration finds a
+        # *different* button, not the same peak's shoulder. -1 is below any
+        # threshold for TM_CCOEFF_NORMED (range -1..1).
+        x0, y0 = max(loc[0] - w // 2, 0), max(loc[1] - h // 2, 0)
+        x1, y1 = loc[0] + w // 2, loc[1] + h // 2
+        res[y0:y1, x0:x1] = -1.0
+
+    return matches
+
+
+def check_is_active(arrow_crop, active_template_path, passive_template_path):
+    """Classify a cropped button as active or disabled by nearest color match.
+
+    Some buttons (e.g. the pager arrows) are the *same shape* in both states and
+    differ only in tone — a vivid-green "enabled" vs. a muted-gray "disabled".
+    :func:`find_on_image` matches on grayscale and is brightness-invariant, so it
+    locates the button but can't tell the states apart. Here we compare the crop
+    against two reference images and let the closer one win.
+
+    The metric is a raw per-pixel absolute difference in *color* (not a
+    normalized correlation): we deliberately want sensitivity to brightness/tone,
+    which is the entire signal. Lower distance == closer == winner.
+
+    ``arrow_crop`` is a BGR crop of the located button. Returns
+    ``(is_active, dist_active, dist_passive)`` — the two distances are returned so
+    the caller can judge confidence (near-equal == a weak/misaligned match).
+    """
+    h, w = arrow_crop.shape[:2]
+
+    def distance(template_path):
+        ref = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+        if ref is None:
+            raise FileNotFoundError(template_path)
+        ref = cv2.resize(ref, (w, h), interpolation=cv2.INTER_AREA)
+        return float(cv2.absdiff(arrow_crop, ref).mean())  # lower == closer
+
+    dist_active = distance(active_template_path)
+    dist_passive = distance(passive_template_path)
+    return dist_active < dist_passive, dist_active, dist_passive
+
+
 def save_to_folder(image, folder, suffix=""):
     """Save ``image`` to ``folder`` named by current time (ms) + optional suffix."""
     folder = Path(folder)

@@ -5,7 +5,7 @@ from pathlib import Path
 import structlog
 
 
-from .screen import find_on_image, mark_box, mark_circle, save_to_folder, screenshot
+from .screen import check_is_active, find_on_image, mark_box, mark_circle, save_to_folder, screenshot
 from .resources import TEMPLATE_ISL_COLLECT_BUTTON, TEMPLATE_MAP_MAIN_PLANT, TEMPLATE_MAP_SEPARATOR
 from .timer_cm import TinyProfiler
 
@@ -94,14 +94,17 @@ class AutoMonstrator:
         if not isinstance(result, FindStep):
             raise ValueError("Then click only may be used after Find steps")
 
-        (x, y), width, height = (result.position, result.width, result.height)
+        (x, y) = result.position
+        # move_to/click_at map the pixel into the absolute axis range using the
+        # *frame* dimensions, not the matched box's. Read them off the screenshot.
+        frame_h, frame_w = result.image.shape[:2]
 
         if self.annotate:
             annotated = mark_circle(result.image, x, y)  # red circle at the click point
             save_to_folder(annotated, self.captures_dir, suffix=result.suffix + "_click")
 
-        log.info(f"   clicking at {result.title}...", x=x, y=y, width=width, height=height)
-        self.mouse.click_at(x, y, width, height)
+        log.info(f"   clicking at {result.title}...", x=x, y=y, width=frame_w, height=frame_h)
+        self.mouse.click_at(x, y, frame_w, frame_h)
 
 
     def then_click(self, title):
@@ -114,6 +117,58 @@ class AutoMonstrator:
         self.click_on_found(self.last_step)
 
 
+    def check_active_on_found(self, result: FindStep, active_template, passive_template,
+                              force_annotate: bool = False):
+        """Tell whether a previously found button is active (enabled) or disabled.
+
+        Same shape, different tone: we crop the matched box out of the *color*
+        frame and let :func:`yambot.screen.check_is_active` pick the nearest of
+        two reference images. Returns the ``is_active`` bool. The two distances
+        are logged so a near-tie (a weak/misaligned match) is visible.
+        """
+        log = structlog.get_logger(result.title if result else "check_active")
+
+        if not result:
+            raise ValueError("Given step is not set or failed")
+        if not isinstance(result, FindStep):
+            raise ValueError("check_active only may be used after Find steps")
+
+        (x, y) = result.position
+        w, h = result.width, result.height
+        # Crop the matched region (not the whole frame) — that's what we compare.
+        x0, y0 = max(x - w // 2, 0), max(y - h // 2, 0)
+        crop = result.image[y0:y0 + h, x0:x0 + w]
+
+        is_active, dist_active, dist_passive = check_is_active(
+            crop, active_template, passive_template
+        )
+
+        log.info(
+            f"   {result.title} is {'ACTIVE' if is_active else 'disabled'}",
+            is_active=is_active,
+            dist_active=round(dist_active, 2),
+            dist_passive=round(dist_passive, 2),
+        )
+
+        # By default we don't annotate; on request, mark the crop's state.
+        if force_annotate:
+            state = "active" if is_active else "passive"
+            annotated = mark_circle(result.image, x, y,
+                                    color=(0, 255, 0) if is_active else (0, 0, 255))
+            save_to_folder(annotated, self.captures_dir,
+                           suffix=result.suffix + "_" + state)
+
+        return is_active
+
+
+    def then_check_active(self, active_template, passive_template, force_annotate: bool = False):
+        """Run :meth:`check_active_on_found` against the last find result."""
+        if not self.last_step:
+            raise ValueError("Last step is not set or failed")
+        return self.check_active_on_found(self.last_step, active_template, passive_template,
+                                          force_annotate)
+
+
     def scroll_up_on_found(self, clicks, result: FindStep, force_annotate: bool=False):
         """Making mouse click using previous find result"""
         log = structlog.get_logger()
@@ -123,7 +178,8 @@ class AutoMonstrator:
         if not isinstance(result, FindStep):
             raise ValueError("Then scroll_up only may be used after Find steps")
 
-        (x, y), width, height = (result.position, result.width, result.height)
+        (x, y) = result.position
+        frame_h, frame_w = result.image.shape[:2]
 
         log.info(f"   scrolling up at {result.title}...")
 
@@ -132,7 +188,7 @@ class AutoMonstrator:
             annotated = mark_circle(result.image, x, y)  # red circle at the click point
             save_to_folder(annotated, self.captures_dir, suffix=result.suffix + "_scroll_up")
 
-        self.mouse.move_to(x, y, height, width)
+        self.mouse.move_to(x, y, frame_w, frame_h)
         time.sleep(0.1)
         self.mouse.scroll_up(clicks)
         time.sleep(0.1)
@@ -147,14 +203,15 @@ class AutoMonstrator:
         if not isinstance(result, FindStep):
             raise ValueError("Then scroll_down only may be used after Find steps")
 
-        (x, y), width, height = (result.position, result.width, result.height)
+        (x, y) = result.position
+        frame_h, frame_w = result.image.shape[:2]
 
-        log.info(f"   scrolling up at {result.title}...")
+        log.info(f"   scrolling down at {result.title}...")
 
         # By default we not annotate scrolling
         if force_annotate:
             annotated = mark_circle(result.image, x, y)  # red circle at the click point
-            save_to_folder(annotated, self.captures_dir, suffix=result.suffix + "_scroll_up")
+            save_to_folder(annotated, self.captures_dir, suffix=result.suffix + "_scroll_down")
 
-        self.mouse.move_to(x, y, height, width)
+        self.mouse.move_to(x, y, frame_w, frame_h)
         self.mouse.scroll_down(clicks)
