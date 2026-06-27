@@ -13,22 +13,9 @@ import cv2
 import numpy as np
 
 #: Where a freshly grabbed full-screen frame is written by default.
-
-
-
-_PKG_DIR = Path(__file__).parent
-TEMPLATES_DIR = _PKG_DIR / "templates"
-
 VISUAL_LOG = Path("captures")
 SCREENSHOT_PATH = VISUAL_LOG / "screenshot.png"
 
-#: The button we hunt for each cycle. Ships inside the package.
-TEMPLATE_ISL_COLLECT_BUTTON = TEMPLATES_DIR / "collect_all.png"
-TEMPLATE_ISL_CLOSE_BUTTON = TEMPLATES_DIR / "close_button.png"
-TEMPLATE_MAP_SEPARATOR = TEMPLATES_DIR / "island_list_separator.png"
-TEMPLATE_MAP_MAIN_PLANT = TEMPLATES_DIR / "main_01_plant.png"
-TEMPLATE_MAP_MAIN_COLD = TEMPLATES_DIR / "main_02_cold.png"
-TEMPLATE_MAP_MAIN_AIR = TEMPLATES_DIR / "main_03_air.png"
 
 def screenshot(path=SCREENSHOT_PATH):
     """Capture the full screen via Spectacle, save to ``path``, return a BGR image.
@@ -71,25 +58,25 @@ def find_on_image(image, template_path, threshold=0.80, scales=None):
     best = None  # (score, x_center, y_center, w, h)
     th, tw = template.shape[:2]
     for s in scales:
-        w, h = int(tw * s), int(th * s)
-        if w < 8 or h < 8 or w > gray.shape[1] or h > gray.shape[0]:
+        width, height = int(tw * s), int(th * s)
+        if width < 8 or height < 8 or width > gray.shape[1] or height > gray.shape[0]:
             continue
-        resized = cv2.resize(template, (w, h), interpolation=cv2.INTER_AREA)
+        resized = cv2.resize(template, (width, height), interpolation=cv2.INTER_AREA)
         res = cv2.matchTemplate(gray, resized, cv2.TM_CCOEFF_NORMED)
         _, score, _, loc = cv2.minMaxLoc(res)
         if best is None or score > best[0]:
-            best = (score, loc[0] + w // 2, loc[1] + h // 2, w, h)
+            best = (score, loc[0] + width // 2, loc[1] + height // 2, width, height)
 
     if best is None:
         return None
 
     # This is for simpler reading
-    score, x, y, w, h = best
+    score, x, y, width, height = best
     is_ok = score >= threshold  # TM_CCOEFF_NORMED: higher == better match
-    return x, y, is_ok, score, w, h
+    return x, y, width, height, score, is_ok
 
 
-def save(image, folder, suffix=""):
+def save_to_folder(image, folder, suffix=""):
     """Save ``image`` to ``folder`` named by current time (ms) + optional suffix."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -100,18 +87,18 @@ def save(image, folder, suffix=""):
     return path
 
 
-def mark(image, x, y, radius=40, thickness=4):
+def mark_circle(image, x, y, radius=40, thickness=4, color=(0, 0, 255)):
     """Draw a red circle at ``(x, y)`` on a copy and return it.
 
     Marks the interaction point (where the mouse clicks). Only draws — the
     caller decides whether to :func:`save` the result.
     """
     out = image.copy()
-    cv2.circle(out, (x, y), radius, (0, 0, 255), thickness)  # (0,0,255)=red in BGR
+    cv2.circle(out, (x, y), radius, color, thickness)  # (0,0,255)=red in BGR
     return out
 
 
-def box(image, x, y, w, h, thickness=3):
+def mark_box(image, x, y, w, h, thickness=3, color=(0, 255, 0)):
     """Draw a ``w``x``h`` rectangle centered at ``(x, y)`` on a copy and return it.
 
     Outlines the region where a subimage was matched (pairs with :func:`mark`,
@@ -121,5 +108,5 @@ def box(image, x, y, w, h, thickness=3):
     """
     out = image.copy()
     x0, y0 = x - w // 2, y - h // 2
-    cv2.rectangle(out, (x0, y0), (x0 + w, y0 + h), (0, 255, 0), thickness)  # green in BGR
+    cv2.rectangle(out, (x0, y0), (x0 + w, y0 + h), color, thickness)  # green in BGR
     return out
