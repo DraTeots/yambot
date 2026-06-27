@@ -7,13 +7,15 @@ import structlog
 from .keyboard import key_name, wait_for_keys
 from .monstep import AutoMonstrator, FailedStep
 from .mouse import VirtualMouse
-from .screen import find_on_image, mark_box, mark_circle, save_to_folder, screenshot
+from .screen import find_on_image, images_similar, mark_box, mark_circle, save_to_folder, screenshot
 from .resources import (
     TEMPLATE_ISL_COLLECT_BUTTON, TEMPLATE_MAP_MAIN_PLANT, TEMPLATE_MAP_SEPARATOR, ISLANDS_MAIN,
     TEMPLATE_CONFIRM_BUTTON,
     TEMPLATE_FRIEND_BACK_ACTIVE, TEMPLATE_FRIEND_BACK_INACTIVE,
     TEMPLATE_FRIEND_NEXT_ACTIVE, TEMPLATE_FRIEND_NEXT_INACTIVE,
     TEMPLATE_FRIEND_QUICK_LIGHT,
+    TEMPLATE_FRIEND_LIGHT_ACTIVE, TEMPLATE_FRIEND_LIGHT_INACTIVE, TEMPLATE_FRIEND_LIGHT,
+    TEMPLATE_FRIEND_MAP_CLOSE, TEMPLATE_FRIEND_ISLAND_BUTTON, TEMPLATE_GO_BUTTON,
 )
 from .timer_cm import TinyProfiler
 
@@ -23,17 +25,46 @@ SWITCH_DELAY = 5.0  # seconds to switch screens before a cycle fires
 
 REPEAT_KEY = e.KEY_1
 FRIENDS_KEY = e.KEY_2
+ADVANCED_FRIENDS_KEY = e.KEY_3
 QUIT_KEYS = (e.KEY_Q, e.KEY_ESC)
 
 #: Friends routine pacing. Generous waits — the game animates page turns and the
 #: confirm dialog, and we'd rather be slow than click into a half-drawn screen.
 CONFIRM_WAIT = 1.0   # after a quick-light tap, before the confirm dialog appears
-PAGE_WAIT = 1.5      # after a page turn, before the new friends are drawn
+PAGE_WAIT = 0.5      # after a page turn, before the new friends are drawn
+
+#: Advanced flow extra pacing — visiting a friend's map is animation-heavy.
+MAP_LOAD_WAIT = 4.0  # after confirm, while the friend's map opens
+GO_WAIT = 8.0        # after pressing Go, while their island loads (per spec)
+MAP_CLOSE_WAIT = 8.0 # after closing a friend's map (per spec)
+
+#: Hunting the fire on a friend's island map: scroll the island list to the top,
+#: then step down through it re-checking for the fire before giving up.
+MAP_FIRE_SCROLL_UP = 30    # clicks to reach the top of the friend's island list
+MAP_FIRE_SCROLL_DOWN = 3   # clicks to advance the list between checks
+MAP_FIRE_SCROLL_TRIES = 10 # how many down-steps to try before escaping
+MAP_SCROLL_WAIT = 1.0      # let the list settle after each scroll
 
 #: Loop backstops so a misread never turns into an endless click storm. The
 #: list is 18 pages (see "1/18"); a page shows 5 friends. Bump if you outgrow them.
 MAX_PAGES = 30
 MAX_LIGHTS_PER_PAGE = 12
+
+#: Friend "fingerprint" crop, as multiples of the located fire/light button box.
+#: The fire button sits at the card's bottom-left, so we expand up and to the
+#: right to grab the *portrait* — the part that actually differs between friends
+#: (the card chrome/banner/buttons are identical, so including them would make
+#: different friends look alike). All four are offsets *above*/around the button
+#: center; tune by eyeballing the saved ``*_served`` crops in captures/.
+CARD_LEFT = 0.8    # extend left of the button center by this × button width
+CARD_RIGHT = 2.0   # extend right by this × button width
+CARD_TOP = 7.0     # top edge, this × button height *above* the button center
+CARD_BOTTOM = 2.0  # bottom edge, this × button height above center (above banner)
+
+#: How alike two portrait crops must be (0..1) to count as the same friend. High,
+#: because the shared card frame already inflates similarity. Lower if a served
+#: friend keeps getting re-served; raise if distinct friends get skipped.
+SERVED_MATCH_THRESHOLD = 0.90
 
 shared_processors = [
     # Processors that have nothing to do with output,
@@ -217,6 +248,13 @@ def process_quick_light(m: AutoMonstrator):
         raise RuntimeError("Pressed quick-light but no confirm dialog appeared")
     m.click_on_found(confirm)
     time.sleep(CONFIRM_WAIT)
+
+    # Then we will have the second confirm light
+    confirm = m.find_on_screen(TEMPLATE_CONFIRM_BUTTON, "Confirm button2", "confirm2")
+    if not confirm:
+        raise RuntimeError("Pressed quick-light confirm but no final confirm dialog appeared")
+    m.click_on_found(confirm)
+    time.sleep(CONFIRM_WAIT)
     return True
 
 
@@ -262,6 +300,212 @@ def run_friends(mouse: VirtualMouse):
     print(f"   Reached the {MAX_PAGES}-page cap — stopping.")
 
 
+# --- Advanced friends (button 3): light each friend via their own map ------
+
+def advance_to_next_page(m: AutoMonstrator) -> bool:
+    """Turn to the next friends page if the pager's next button is active.
+
+    Returns True if we moved to a new page, False if the next button is missing
+    or inactive (no more pages).
+    """
+    nxt = m.find_on_screen(TEMPLATE_FRIEND_NEXT_ACTIVE, "Next button", "friend_next")
+    if not nxt:
+        print("   No next button found — done.")
+        return False
+    if not m.check_active_on_found(nxt, TEMPLATE_FRIEND_NEXT_ACTIVE,
+                                   TEMPLATE_FRIEND_NEXT_INACTIVE, force_annotate=True):
+        print("   Next button inactive — all pages processed.")
+        return False
+    m.click_on_found(nxt)
+    time.sleep(PAGE_WAIT)
+    return True
+
+
+def leave_friend_map(m: AutoMonstrator):
+    """Escape a friend's map back to the friends list.
+
+    Used whenever the map didn't offer what we expected: close the map, give it
+    a beat (per spec, 3s), then press the island button that returns to the list.
+    """
+    close = m.find_on_screen(TEMPLATE_FRIEND_MAP_CLOSE, "Friend map close", "map_close")
+    if close:
+        m.click_on_found(close)
+    time.sleep(MAP_CLOSE_WAIT)
+    return_to_friend_list(m)
+
+
+def return_to_friend_list(m: AutoMonstrator):
+    """Press the island button to go from a friend's map back to the list."""
+    island = m.find_on_screen(TEMPLATE_FRIEND_ISLAND_BUTTON, "Friend island button", "island")
+    if island:
+        m.click_on_found(island)
+    time.sleep(MAP_LOAD_WAIT)
+
+
+def card_fingerprint(light):
+    """Crop a friend's portrait from a located list light/fire button.
+
+    The fire button sits at the card's bottom-left, so we expand up and to the
+    right (in button-box units) to grab the portrait — the part unique to each
+    friend. Clamped to the frame. This crop is what we store/compare to tell
+    *which friend* a light belongs to. Returns the BGR crop (possibly empty if
+    the button sat at the very edge).
+    """
+    (x, y) = light.position
+    w, h = light.width, light.height
+    x0 = max(int(x - CARD_LEFT * w), 0)
+    x1 = min(int(x + CARD_RIGHT * w), light.image.shape[1])
+    y0 = max(int(y - CARD_TOP * h), 0)
+    y1 = max(int(y - CARD_BOTTOM * h), 0)
+    return light.image[y0:y1, x0:x1]
+
+
+def first_active_light(m: AutoMonstrator, served):
+    """Return ``(light, fingerprint)`` for the first friend worth serving, else ``(None, None)``.
+
+    A friend is worth serving when their list light reads **active** (tone, not
+    just shape — already-lit friends read inactive) *and* they aren't one we've
+    already visited this run. The served check is what breaks the relentless
+    loop: when we escape a friend's map without lighting, their list light stays
+    active, so without remembering them we'd pick the same friend forever.
+    """
+    for light in m.find_all_on_screen(TEMPLATE_FRIEND_LIGHT_ACTIVE, "Friend light", "friend_light"):
+        if not m.check_active_on_found(light, TEMPLATE_FRIEND_LIGHT_ACTIVE,
+                                       TEMPLATE_FRIEND_LIGHT_INACTIVE):
+            continue  # already lit by the game
+
+        fingerprint = card_fingerprint(light)
+        scores = [images_similar(fingerprint, s, SERVED_MATCH_THRESHOLD) for s in served]
+        if any(is_match for is_match, _ in scores):
+            best = max(score for _, score in scores)
+            print(f"   Skipping a friend already served this run (match {best:.2f}).")
+            continue
+
+        return light, fingerprint
+    return None, None
+
+
+def find_fire_on_friend_map(m: AutoMonstrator):
+    """Find the fire (light) on a friend's island map, scrolling the list if needed.
+
+    Glance for the fire where we land. If it's not in view, scroll the friend's
+    island list to the top (move to the separator, scroll up), then step down
+    through the list re-checking each time — the same scan-and-scroll pattern as
+    :func:`find_island_on_map`. Returns the fire FindStep, or None if it never
+    surfaces (caller then escapes).
+    """
+    fire = m.find_on_screen(TEMPLATE_FRIEND_LIGHT, "Friend light (map)", "light_map")
+    if fire:
+        return fire
+
+    print("   No fire in view — scrolling the friend's island list to look for it.")
+    sep = m.find_on_screen(TEMPLATE_MAP_SEPARATOR, "Separator area", "sep_area")
+    if not sep:
+        print("   No island-list separator on the friend's map — can't scroll.")
+        return None
+
+    m.scroll_up_on_found(MAP_FIRE_SCROLL_UP, sep, True)
+    time.sleep(MAP_SCROLL_WAIT)
+
+    for i in range(MAP_FIRE_SCROLL_TRIES):
+        print(f"   ==== Fire scroll try {i + 1} of {MAP_FIRE_SCROLL_TRIES} ====")
+        fire = m.find_on_screen(TEMPLATE_FRIEND_LIGHT, "Friend light (map)", "light_map")
+        if fire:
+            return fire
+        m.scroll_down_on_found(MAP_FIRE_SCROLL_DOWN, sep, True)
+        time.sleep(MAP_SCROLL_WAIT)
+
+    return None
+
+
+def process_advanced_light(m: AutoMonstrator, light):
+    """Light one friend the long way: open their map, light it there, return.
+
+    Press the (already-confirmed active) list light and confirm. Then, on the
+    friend's map, find the on-map fire (scrolling the island list to hunt for it):
+    if it never surfaces, bail back to the list; if it does, press it and press Go
+    (no Go ⇒ also bail). After Go we wait for their island, press the on-map light
+    once more (whether or not it lands), and finally return to the list.
+    """
+    m.click_on_found(light)
+    time.sleep(CONFIRM_WAIT)
+
+    confirm = m.find_on_screen(TEMPLATE_CONFIRM_BUTTON, "Confirm button", "confirm")
+    if not confirm:
+        raise RuntimeError("Pressed friend light but no confirm dialog appeared")
+    m.click_on_found(confirm)
+    time.sleep(MAP_LOAD_WAIT)
+
+    # Now on the friend's map. Hunt for the on-map fire, scrolling if not in view.
+    light_map = find_fire_on_friend_map(m)
+    if not light_map:
+        print("   No on-map fire even after scrolling — leaving this friend's map.")
+        leave_friend_map(m)
+        return
+
+    m.click_on_found(light_map)
+    time.sleep(CONFIRM_WAIT)
+
+    go = m.find_on_screen(TEMPLATE_GO_BUTTON, "Go button", "go")
+    if not go:
+        print("   No Go button — leaving this friend's map.")
+        leave_friend_map(m)
+        return
+
+    m.click_on_found(go)
+    time.sleep(GO_WAIT)
+
+    # Their island is up. Light it once more if the on-map light is present.
+    light_again = m.find_on_screen(TEMPLATE_FRIEND_LIGHT, "Friend light (island)", "light_again")
+    if light_again:
+        m.click_on_found(light_again)
+        time.sleep(CONFIRM_WAIT)
+
+    # Whether or not that landed, head back to the friends list.
+    return_to_friend_list(m)
+
+
+def process_advanced_page(m: AutoMonstrator, served):
+    """Light every still-unserved active friend on the page, one map visit each.
+
+    Scan for all light buttons, act on the first active friend we haven't served
+    yet, record their fingerprint, then re-scan — each map round-trip redraws the
+    page. ``served`` carries the run's fingerprints so escapes (which leave the
+    light active) don't get retried. Stop when no servable friend remains.
+    """
+    for _ in range(MAX_LIGHTS_PER_PAGE):
+        light, fingerprint = first_active_light(m, served)
+        if not light:
+            print("   No more unserved active lights on this page.")
+            return
+        process_advanced_light(m, light)
+        # Remember this friend so we never revisit them, even if the escape path
+        # left their list light active. Save the crop for eyeballing/tuning.
+        served.append(fingerprint)
+        if fingerprint.size:  # skip the annotation if the crop came out empty
+            save_to_folder(fingerprint, DEBUG_DIR, suffix=f"served_{len(served)}")
+    print(f"   Hit the {MAX_LIGHTS_PER_PAGE}-light cap on one page — moving on.")
+
+
+def run_advanced_friends(mouse: VirtualMouse):
+    """Walk every friends page, lighting each active friend via their own map.
+
+    Triggered by pressing **3** with the friends list open. Same page walk as the
+    quick-light routine, but each friend is lit by opening their map (see
+    :func:`process_advanced_light`).
+    """
+    m = AutoMonstrator(mouse)
+    served = []  # portrait fingerprints of friends visited this run (see first_active_light)
+    print("=== Advanced friends routine: rewinding to the first page ===")
+    rewind_friends_to_first_page(m)
+
+    for page in range(1, MAX_PAGES + 1):
+        print(f"=== Advanced friends page {page} ===")
+        process_advanced_page(m, served)
+        if not advance_to_next_page(m):
+            print("   All pages processed. Done.")
+            return
+    print(f"   Reached the {MAX_PAGES}-page cap — stopping.")
 
 
 
@@ -271,8 +515,8 @@ def main():
 
     with VirtualMouse() as mouse:
         while True:
-            print("\npress [1] map, [2] friends, [q]/[esc] to quit — listening...")
-            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, *QUIT_KEYS), log=print)
+            print("\npress [1] map, [2] friends, [3] advanced friends, [q]/[esc] to quit — listening...")
+            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, ADVANCED_FRIENDS_KEY, *QUIT_KEYS), log=print)
             if pressed is None:
                 print("no keyboards found to read — quitting")
                 break
@@ -282,6 +526,9 @@ def main():
             if pressed == FRIENDS_KEY:
                 print(f"{key_name(pressed)} pressed — running friends routine")
                 run_friends(mouse)
+            elif pressed == ADVANCED_FRIENDS_KEY:
+                print(f"{key_name(pressed)} pressed — running advanced friends routine")
+                run_advanced_friends(mouse)
             else:
                 print(f"{key_name(pressed)} pressed — running map")
                 run_map(mouse)

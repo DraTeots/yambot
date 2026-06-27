@@ -33,6 +33,19 @@ TEMPLATE_FRIEND_NEXT_ACTIVE = TEMPLATES_DIR / "friend_list_next_active_button.pn
 TEMPLATE_FRIEND_NEXT_INACTIVE = TEMPLATES_DIR / "friend_list_next_inactive_button.png"
 TEMPLATE_FRIEND_QUICK_LIGHT = TEMPLATES_DIR / "friend_quick_light_active.png"
 
+# Advanced flow: light each friend individually. The list-side light button has
+# an active/inactive pair (already-lit friends read inactive). Lighting one opens
+# that friend's map, where we hunt the on-map light + go buttons and navigate
+# back via the close / island buttons.
+TEMPLATE_FRIEND_LIGHT_ACTIVE = TEMPLATES_DIR / "friend_light_active.png"
+TEMPLATE_FRIEND_LIGHT_INACTIVE = TEMPLATES_DIR / "friend_light_inactive.png"
+#: The light button on a friend's own map — same image whether reached from the
+#: map view or after pressing Go onto their island.
+TEMPLATE_FRIEND_LIGHT = TEMPLATES_DIR / "friend_light.png"
+TEMPLATE_FRIEND_MAP_CLOSE = TEMPLATES_DIR / "friend_map_close_button.png"
+TEMPLATE_FRIEND_ISLAND_BUTTON = TEMPLATES_DIR / "friend_island_button.png"
+TEMPLATE_GO_BUTTON = TEMPLATES_DIR / "go_button.png"
+
 # --- Map islands ----------------------------------------------------------
 # Keyed by island so callers read like the game's own labels. The numeric
 # prefix preserves the in-game order; ``_v1`` is the template revision.

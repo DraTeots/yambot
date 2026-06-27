@@ -135,6 +135,27 @@ def find_all_on_image(image, template_path, threshold=0.80, scales=None, max_res
     return matches
 
 
+def images_similar(a, b, threshold=0.90):
+    """Return ``(is_similar, score)`` for two BGR crops by normalized matching.
+
+    Used to ask "is this the same thing?" — e.g. is this friend card one we've
+    already visited this run. Unlike :func:`check_is_active` (which wants raw tone
+    sensitivity), here we want robustness to small brightness/scale wobble, so we
+    use ``TM_CCOEFF_NORMED``: 1.0 == identical, lower == more different. The crops
+    are resized to a common size first so slightly different match boxes compare.
+    """
+    if a is None or b is None or a.size == 0 or b.size == 0:
+        return False, 0.0
+    h = min(a.shape[0], b.shape[0])
+    w = min(a.shape[1], b.shape[1])
+    if h < 8 or w < 8:
+        return False, 0.0
+    a2 = cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA)
+    b2 = cv2.resize(b, (w, h), interpolation=cv2.INTER_AREA)
+    score = float(cv2.matchTemplate(a2, b2, cv2.TM_CCOEFF_NORMED).max())
+    return score >= threshold, score
+
+
 def check_is_active(arrow_crop, active_template_path, passive_template_path):
     """Classify a cropped button as active or disabled by nearest color match.
 

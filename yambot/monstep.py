@@ -5,7 +5,7 @@ from pathlib import Path
 import structlog
 
 
-from .screen import check_is_active, find_on_image, mark_box, mark_circle, save_to_folder, screenshot
+from .screen import check_is_active, find_all_on_image, find_on_image, mark_box, mark_circle, save_to_folder, screenshot
 from .resources import TEMPLATE_ISL_COLLECT_BUTTON, TEMPLATE_MAP_MAIN_PLANT, TEMPLATE_MAP_SEPARATOR
 from .timer_cm import TinyProfiler
 
@@ -83,6 +83,42 @@ class AutoMonstrator:
             save_to_folder(annotated, self.captures_dir, suffix=suffix)
 
         return FindStep(image, title, suffix, x, y, w, h, score, is_ok)
+
+
+    def find_all_on_screen(self, template, title, suffix):
+        """Like :meth:`find_on_screen`, but return *every* match above threshold.
+
+        Wraps :func:`yambot.screen.find_all_on_image` for repeated buttons (e.g.
+        the five friend-light icons on a page). Returns a list of FindStep,
+        strongest-first, all sharing the one screenshot; an empty list means
+        nothing matched. Not a ``@step`` — it doesn't set ``last_step`` (there's
+        no single result to act on with ``then_*``).
+        """
+        log = structlog.get_logger(title, title=title, suffix=suffix)
+        log.info("Step (all): %s", title)
+        image = screenshot()
+
+        print("   Finding all templates...")
+        with TinyProfiler("   Finding all images"):
+            matches = find_all_on_image(image, template)
+
+        print(f"   Found {len(matches)} match(es)")
+        if not matches:
+            return []
+
+        results = [
+            FindStep(image, title, f"{suffix}_{i}", x, y, w, h, score, True)
+            for i, (x, y, w, h, score) in enumerate(matches)
+        ]
+
+        if self.annotate:
+            annotated = image
+            for x, y, w, h, score in matches:
+                annotated = mark_box(annotated, x, y, w, h)
+                annotated = mark_circle(annotated, x, y)
+            save_to_folder(annotated, self.captures_dir, suffix=suffix + "_all")
+
+        return results
 
 
     def click_on_found(self, result: FindStep):
