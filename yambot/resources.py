@@ -45,6 +45,10 @@ TEMPLATE_FRIEND_LIGHT = TEMPLATES_DIR / "friend_light.png"
 TEMPLATE_FRIEND_MAP_CLOSE = TEMPLATES_DIR / "friend_map_close_button.png"
 TEMPLATE_FRIEND_ISLAND_BUTTON = TEMPLATES_DIR / "friend_island_button.png"
 TEMPLATE_GO_BUTTON = TEMPLATES_DIR / "go_button.png"
+#: Sometimes a friend's map opens zoomed into a sub-island; this button returns
+#: to their main map before we hunt for the fire.
+TEMPLATE_MAP_GO_TO_MAIN_WORLD = TEMPLATES_DIR / "map_go_main_world_button.png"
+TEMPLATE_MAP_GO_TO_MIRROR_WORLD = TEMPLATES_DIR / "map_go_mirror_world_button.png"
 
 # --- Map islands ----------------------------------------------------------
 # Keyed by island so callers read like the game's own labels. The numeric

@@ -16,6 +16,7 @@ from .resources import (
     TEMPLATE_FRIEND_QUICK_LIGHT,
     TEMPLATE_FRIEND_LIGHT_ACTIVE, TEMPLATE_FRIEND_LIGHT_INACTIVE, TEMPLATE_FRIEND_LIGHT,
     TEMPLATE_FRIEND_MAP_CLOSE, TEMPLATE_FRIEND_ISLAND_BUTTON, TEMPLATE_GO_BUTTON,
+    TEMPLATE_MAP_GO_TO_MAIN_WORLD,
 )
 from .timer_cm import TinyProfiler
 
@@ -34,9 +35,10 @@ CONFIRM_WAIT = 1.0   # after a quick-light tap, before the confirm dialog appear
 PAGE_WAIT = 0.5      # after a page turn, before the new friends are drawn
 
 #: Advanced flow extra pacing — visiting a friend's map is animation-heavy.
-MAP_LOAD_WAIT = 4.0  # after confirm, while the friend's map opens
-GO_WAIT = 8.0        # after pressing Go, while their island loads (per spec)
-MAP_CLOSE_WAIT = 8.0 # after closing a friend's map (per spec)
+MAP_LOAD_WAIT = 4.0    # after confirm, while the friend's map opens
+GO_WAIT = 8.0          # after pressing Go, while their island loads (per spec)
+MAP_CLOSE_WAIT = 8.0   # after closing a friend's map (per spec)
+BACK_TO_MAIN_WAIT = 4.0  # after backing out of a sub-island to the friend's main map
 
 #: Hunting the fire on a friend's island map: scroll the island list to the top,
 #: then step down through it re-checking for the fire before giving up.
@@ -435,6 +437,13 @@ def process_advanced_light(m: AutoMonstrator, light):
         raise RuntimeError("Pressed friend light but no confirm dialog appeared")
     m.click_on_found(confirm)
     time.sleep(MAP_LOAD_WAIT)
+
+    # The map may open in mirror world/map. If a "back to main map" button is
+    # showing, press it first so the fire hunt starts from the friend's main map.
+    back_to_main = m.find_on_screen(TEMPLATE_MAP_GO_TO_MAIN_WORLD, "Back to main map", "back_to_main")
+    if back_to_main:
+        m.click_on_found(back_to_main)
+        time.sleep(BACK_TO_MAIN_WAIT)
 
     # Now on the friend's map. Hunt for the on-map fire, scrolling if not in view.
     light_map = find_fire_on_friend_map(m)
