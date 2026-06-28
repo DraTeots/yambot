@@ -222,3 +222,5 @@ captures/
 latest_screenshot.png
 
 .idea/
+
+uv.lock

@@ -1,13 +1,17 @@
 [project]
 name = "yambot"
 version = "0.1.0"
-description = "Screenshot-driven autoclicker for My Singing Monsters on Linux/Wayland"
+description = "Screenshot-driven autoclicker for My Singing Monsters on Linux/Wayland and Windows"
 requires-python = ">=3.11"
 dependencies = [
     "opencv-python",
     "numpy",
-    "evdev",
-    "structlog"
+    "structlog",
+    # Linux input/output: evdev/uinput. Linux-only wheel.
+    "evdev; sys_platform == 'linux'",
+    # Windows input/output: pynput (mouse + keyboard) and mss (screenshot).
+    "pynput; sys_platform == 'win32'",
+    "mss; sys_platform == 'win32'",
 ]
 
 [project.scripts]

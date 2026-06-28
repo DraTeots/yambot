@@ -5,36 +5,37 @@ it only grabs a frame, finds a template inside it, and can annotate/save the
 result for debugging. Driving the mouse lives in :mod:`yambot.mouse`.
 """
 
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from .capture_impl import make_capture_impl
+
 #: Where a freshly grabbed full-screen frame is written by default.
 VISUAL_LOG = Path("captures")
 SCREENSHOT_PATH = VISUAL_LOG / "screenshot.png"
 
+#: The capture backend, selected per-OS at import. Swap it (e.g. for a different
+#: Windows grabber or per-window capture) via :func:`use_capture_impl`.
+_capture_impl = make_capture_impl()
+
+
+def use_capture_impl(impl):
+    """Replace the active capture backend. Must expose ``grab(path) -> BGR ndarray``."""
+    global _capture_impl
+    _capture_impl = impl
+
 
 def screenshot(path=SCREENSHOT_PATH):
-    """Capture the full screen via Spectacle, save to ``path``, return a BGR image.
+    """Capture the full screen, save to ``path``, and return a BGR image.
 
-    Spectacle is the KDE screen grabber; ``-b -n -f`` makes it run headless
-    (no GUI, no notification, full screen) and ``-o`` chooses the output file.
-    We read the file back with OpenCV so the rest of the pipeline gets a numpy
-    array.
+    Delegates to the active capture backend (:mod:`yambot.capture_impl`): Spectacle
+    on Linux, ``mss`` on Windows. Both return a numpy BGR array for the rest of
+    the pipeline.
     """
-    path = Path(path)
-    subprocess.run(
-        ["spectacle", "-b", "-n", "-f", "-o", str(path)],
-        check=True,
-        stderr=subprocess.DEVNULL,
-    )
-    img = cv2.imread(str(path))
-    if img is None:
-        raise RuntimeError(f"could not read screenshot at {path}")
-    return img
+    return _capture_impl.grab(Path(path))
 
 
 def find_on_image(image, template_path, threshold=0.80, scales=None):

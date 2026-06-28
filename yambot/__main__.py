@@ -1,9 +1,9 @@
 import sys
 import time
 from pathlib import Path
-from evdev import ecodes as e
 import structlog
 
+from .keys import Key
 from .keyboard import key_name, wait_for_keys
 from .monstep import AutoMonstrator, FailedStep
 from .mouse import VirtualMouse
@@ -23,10 +23,10 @@ from .timer_cm import TinyProfiler
 DEBUG_DIR = "captures"
 SWITCH_DELAY = 5.0  # seconds to switch screens before a cycle fires
 
-REPEAT_KEY = e.KEY_1
-FRIENDS_KEY = e.KEY_2
-ADVANCED_FRIENDS_KEY = e.KEY_3
-QUIT_KEYS = (e.KEY_Q, e.KEY_ESC)
+REPEAT_KEY = Key.K1
+FRIENDS_KEY = Key.K2
+ADVANCED_FRIENDS_KEY = Key.K3
+QUIT_KEYS = (Key.Q, Key.ESC)
 
 #: Friends routine pacing. Generous waits — the game animates page turns and the
 #: confirm dialog, and we'd rather be slow than click into a half-drawn screen.
