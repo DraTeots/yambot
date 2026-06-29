@@ -136,6 +136,13 @@ class EvdevKeyboardImpl:
                     dev = key.fileobj
                     try:
                         events = dev.read()
+                        for event in events:
+                            if event.type != e.EV_KEY or event.value != 1:  # key-down only
+                                continue
+                            if event.code in target_codes:
+                                return self._code_to_key[event.code]
+                            if log is not None:
+                                log(f"captured {self._evdev_key_name(event.code)}")
                     except OSError:
                         # Device went away mid-read (wireless sleep / unplug).
                         # Drop it; we'll re-adopt it if it comes back.
@@ -143,13 +150,6 @@ class EvdevKeyboardImpl:
                             log(f"keyboard {dev.path} disconnected")
                         drop(dev)
                         continue
-                    for event in events:
-                        if event.type != e.EV_KEY or event.value != 1:  # key-down only
-                            continue
-                        if event.code in target_codes:
-                            return self._code_to_key[event.code]
-                        if log is not None:
-                            log(f"captured {self._evdev_key_name(event.code)}")
         finally:
             selector.close()
             for dev in list(devices.values()):
