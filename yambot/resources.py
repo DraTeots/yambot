@@ -21,6 +21,15 @@ TEMPLATE_ISL_COLLECT_BUTTON = TEMPLATES_DIR / "collect_all.png"
 TEMPLATE_ISL_CLOSE_BUTTON = TEMPLATES_DIR / "close_button.png"
 TEMPLATE_CONFIRM_BUTTON = TEMPLATES_DIR / "confirm_button.png"
 TEMPLATE_MAP_SEPARATOR: Path = TEMPLATES_DIR / "island_list_separator.png"
+#: The map button on an island that returns to the world map.
+TEMPLATE_MAP_BUTTON = TEMPLATES_DIR / "map_button.png"
+
+# --- Resource collection (key 5) ------------------------------------------
+# Markers the map list draws on an island's row when it has resources ready to
+# collect. We scan the island list for either; their absence is the signal that
+# an island has nothing waiting.
+TEMPLATE_MAP_HAS_CRYSTALS = TEMPLATES_DIR / "map_has_crystals.png"
+TEMPLATE_MAP_HAS_MONEY = TEMPLATES_DIR / "map_has_money.png"
 
 # --- Friends list ---------------------------------------------------------
 # The list pager has back/next buttons that share a shape per direction and

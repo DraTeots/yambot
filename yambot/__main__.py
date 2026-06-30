@@ -17,6 +17,8 @@ from .resources import (
     TEMPLATE_FRIEND_LIGHT_ACTIVE, TEMPLATE_FRIEND_LIGHT_INACTIVE, TEMPLATE_FRIEND_LIGHT,
     TEMPLATE_FRIEND_MAP_CLOSE, TEMPLATE_FRIEND_ISLAND_BUTTON, TEMPLATE_GO_BUTTON,
     TEMPLATE_MAP_GO_TO_MAIN_WORLD,
+    TEMPLATE_ISL_CLOSE_BUTTON, TEMPLATE_MAP_BUTTON,
+    TEMPLATE_MAP_HAS_CRYSTALS, TEMPLATE_MAP_HAS_MONEY,
 )
 from .timer_cm import TinyProfiler
 
@@ -27,6 +29,7 @@ SWITCH_DELAY = 5.0  # seconds to switch screens before a cycle fires
 REPEAT_KEY = Key.K1
 FRIENDS_KEY = Key.K2
 ADVANCED_FRIENDS_KEY = Key.K3
+COLLECT_KEY = Key.K5
 QUIT_KEYS = (Key.Q, Key.ESC)
 
 #: Friends routine pacing. Generous waits — the game animates page turns and the
@@ -518,14 +521,162 @@ def run_advanced_friends(mouse: VirtualMouse):
 
 
 
+# --- Collect resources (button 5): sweep the map for crystals/money ---------
+
+#: Pacing/limits for the resource-collection sweep. Generous waits because the
+#: game animates entering an island, the collect dialog, and the trip back to
+#: the map; we'd rather be slow than click into a half-drawn screen.
+COLLECT_SCROLL_UP = 30        # clicks to reach the top of the island list
+COLLECT_SCROLL_DOWN = 3       # clicks to advance the list between marker scans
+COLLECT_SCROLL_TRIES = 20     # how many down-steps to try before giving up the sweep
+COLLECT_SCROLL_WAIT = 1.0     # let the list settle after each scroll (per spec)
+COLLECT_SELECT_WAIT = 3.0     # after clicking a marker, before the Go button shows
+COLLECT_GO_WAIT = 8.0         # after Go, while the island loads (per spec)
+COLLECT_DIALOG_WAIT = 2.0     # after collect-all, before the confirm dialog appears
+COLLECT_CONFIRM_WAIT = 4.0    # after confirm, before pressing the map button (per spec)
+COLLECT_MAP_WAIT = 10.0       # after the map button, while the world map redraws (per spec)
+COLLECT_POPUP_WAIT = 1.0      # after closing a promo popup, before re-checking
+
+#: How many promo popups we'll close before deciding the island is stuck.
+COLLECT_MAX_POPUPS = 5
+#: Backstop so a marker that never clears can't loop us forever.
+MAX_COLLECT_ISLANDS = 40
+
+
+def find_resource_marker(m: AutoMonstrator):
+    """Look in the *current* map view for an island with resources ready.
+
+    Glance for the crystals marker, then the money marker; return the first
+    FindStep that lands, or None if neither is in view. No scrolling here — the
+    caller drives the scroll-and-rescan loop.
+    """
+    crystals = m.find_on_screen(TEMPLATE_MAP_HAS_CRYSTALS, "Map has crystals", "has_crystals")
+    if crystals:
+        return crystals
+    money = m.find_on_screen(TEMPLATE_MAP_HAS_MONEY, "Map has money", "has_money")
+    if money:
+        return money
+    return None
+
+
+def close_island_popups(m: AutoMonstrator) -> bool:
+    """Dismiss any promo popups stacked on a freshly-loaded island.
+
+    Press the close button up to ``COLLECT_MAX_POPUPS`` times, re-checking each
+    pass (popups can stack). Returns True once nothing's left to close, or False
+    if one is still showing after all attempts — the caller treats that as a
+    hard failure (per spec).
+    """
+    for i in range(COLLECT_MAX_POPUPS):
+        close = m.find_on_screen(TEMPLATE_ISL_CLOSE_BUTTON, "Close popup", "collect_close")
+        if not close:
+            return True  # nothing (left) to close
+        print(f"   Closing a promo popup ({i + 1}/{COLLECT_MAX_POPUPS})...")
+        m.click_on_found(close)
+        time.sleep(COLLECT_POPUP_WAIT)
+    # One last look — if it's gone now we're fine, otherwise we're stuck.
+    return not m.find_on_screen(TEMPLATE_ISL_CLOSE_BUTTON, "Close popup", "collect_close_final")
+
+
+def collect_from_island(m: AutoMonstrator, marker) -> bool:
+    """Enter the marked island, collect its resources, and return to the map.
+
+    Click the resource marker, press Go to enter the island, close any promo
+    popups, then collect-all + confirm. Finally press the map button to get back.
+    Returns True if we entered the island (and are back on the map), False if no
+    Go button appeared (we never left the map — caller should scroll past it).
+    Raises on a stuck popup, which signals a genuinely broken state.
+    """
+    m.click_on_found(marker)
+    time.sleep(COLLECT_SELECT_WAIT)
+
+    # Same Go button (and action) as the friends flow — press it to enter.
+    go = m.find_on_screen(TEMPLATE_GO_BUTTON, "Go button", "collect_go")
+    if not go:
+        print("   No Go button after selecting the marker — skipping this island.")
+        return False
+    m.click_on_found(go)
+    time.sleep(COLLECT_GO_WAIT)
+
+    # The island may open with promotion popups on top — clear them first.
+    if not close_island_popups(m):
+        raise RuntimeError("Promo popup still showing after "
+                           f"{COLLECT_MAX_POPUPS} close attempts — giving up")
+
+    # Collect everything, then confirm.
+    collect = m.find_on_screen(TEMPLATE_ISL_COLLECT_BUTTON, "Collect all", "collect_all")
+    if collect:
+        m.click_on_found(collect)
+        time.sleep(COLLECT_DIALOG_WAIT)
+        confirm = m.find_on_screen(TEMPLATE_CONFIRM_BUTTON, "Confirm collect", "collect_confirm")
+        if confirm:
+            m.click_on_found(confirm)
+            time.sleep(COLLECT_CONFIRM_WAIT)
+        else:
+            print("   No confirm dialog after collect-all — heading back anyway.")
+    else:
+        print("   No collect-all button on this island — heading back anyway.")
+
+    # Back to the world map for the next island.
+    map_btn = m.find_on_screen(TEMPLATE_MAP_BUTTON, "Map button", "collect_map")
+    if not map_btn:
+        raise RuntimeError("No map button to return to the world map — giving up")
+    m.click_on_found(map_btn)
+    time.sleep(COLLECT_MAP_WAIT)
+    return True
+
+
+def run_collect_resources(mouse: VirtualMouse):
+    """Sweep the world map collecting from every island with resources ready.
+
+    Triggered by pressing **5** with the world map open. Scroll the island list
+    to the top, then step down through it. Whenever an island shows a crystals or
+    money marker, enter it, collect, and come back — then re-check where we land
+    before scrolling on (a collected island stops showing its marker, so we won't
+    loop on it). Finish when a full pass turns up no more markers.
+    """
+    m = AutoMonstrator(mouse)
+    print("=== Collect resources: scrolling the island list to the top ===")
+
+    sep = m.find_on_screen(TEMPLATE_MAP_SEPARATOR, "Separator area", "collect_sep")
+    if not sep:
+        print("   No island-list separator — probably not on the map. Aborting.")
+        return
+    m.scroll_up_on_found(COLLECT_SCROLL_UP, sep, True)
+    time.sleep(COLLECT_SCROLL_WAIT)
+
+    collected = 0
+    scrolls = 0  # consecutive down-steps with nothing found — our give-up budget
+    while scrolls < COLLECT_SCROLL_TRIES and collected < MAX_COLLECT_ISLANDS:
+        marker = find_resource_marker(m)
+        if marker:
+            entered = collect_from_island(m, marker)
+            if entered:
+                collected += 1
+                # Re-check the view we landed on before scrolling (per spec).
+                scrolls = 0
+                continue
+            # Couldn't enter — nudge past this marker so we don't re-hit it.
+        print(f"   ==== Scroll {scrolls + 1} of {COLLECT_SCROLL_TRIES} "
+              f"(collected {collected} so far) ====")
+        m.scroll_down_on_found(COLLECT_SCROLL_DOWN, sep)
+        time.sleep(COLLECT_SCROLL_WAIT)
+        scrolls += 1
+
+    if collected >= MAX_COLLECT_ISLANDS:
+        print(f"   Reached the {MAX_COLLECT_ISLANDS}-island cap — stopping.")
+    else:
+        print(f"   No more resource markers — done. Collected {collected} island(s).")
+
+
 def main():
     logger.info(f"Waiting {SWITCH_DELAY}s before running")
     logger.info("starting")
 
     with VirtualMouse() as mouse:
         while True:
-            print("\npress [1] map, [2] friends, [3] advanced friends, [q]/[esc] to quit — listening...")
-            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, ADVANCED_FRIENDS_KEY, *QUIT_KEYS), log=print)
+            print("\npress [1] map, [2] friends, [3] advanced friends, [5] collect resources, [q]/[esc] to quit — listening...")
+            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, ADVANCED_FRIENDS_KEY, COLLECT_KEY, *QUIT_KEYS), log=print)
             if pressed is None:
                 print("no keyboards found to read — quitting")
                 break
@@ -538,6 +689,9 @@ def main():
             elif pressed == ADVANCED_FRIENDS_KEY:
                 print(f"{key_name(pressed)} pressed — running advanced friends routine")
                 run_advanced_friends(mouse)
+            elif pressed == COLLECT_KEY:
+                print(f"{key_name(pressed)} pressed — running collect resources routine")
+                run_collect_resources(mouse)
             else:
                 print(f"{key_name(pressed)} pressed — running map")
                 run_map(mouse)

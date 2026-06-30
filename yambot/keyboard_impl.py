@@ -35,6 +35,7 @@ class EvdevKeyboardImpl:
             Key.K1: e.KEY_1,
             Key.K2: e.KEY_2,
             Key.K3: e.KEY_3,
+            Key.K5: e.KEY_5,
             Key.Q: e.KEY_Q,
             Key.ESC: e.KEY_ESC,
         }
@@ -184,6 +185,8 @@ class PynputKeyboardImpl:
                 return Key.K2
             if ch == "3":
                 return Key.K3
+            if ch == "5":
+                return Key.K5
             if ch is not None and ch.lower() == "q":
                 return Key.Q
             if k == keyboard.Key.esc:
