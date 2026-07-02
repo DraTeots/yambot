@@ -55,7 +55,7 @@ class AutoMonstrator:
         self.mouse = mouse
 
     @step
-    def find_on_screen(self, template, title, suffix):
+    def find_on_screen(self, template, title, suffix, threshold=0.80):
         log = structlog.get_logger(title, title=title, suffix=suffix)
 
         # Take a screenshot.
@@ -66,7 +66,7 @@ class AutoMonstrator:
 
         print("   Finding template...")
         with TinyProfiler("   Finding image"):
-            target = find_on_image(image, template)
+            target = find_on_image(image, template, threshold=threshold)
             if target is None:
                 print("   No target found")
                 return FailedStep()
@@ -75,17 +75,19 @@ class AutoMonstrator:
         print(f"   Best found at ({x}, {y}) with score {score}. Is OK? {is_ok}")
         if not is_ok:
             print("   Target is not OK. Looks we didn't found")
+            if self.annotate:
+                annotated = mark_box(image, x, y, w, h)  # green square around the matched region
+                save_to_folder(annotated, self.captures_dir, suffix=suffix)
             return FailedStep()
 
         if self.annotate:
             annotated = mark_box(image, x, y, w, h)   # green square around the matched region
-            annotated = mark_circle(annotated, x, y)    # red circle at the click point
             save_to_folder(annotated, self.captures_dir, suffix=suffix)
 
         return FindStep(image, title, suffix, x, y, w, h, score, is_ok)
 
 
-    def find_all_on_screen(self, template, title, suffix):
+    def find_all_on_screen(self, template, title, suffix, sort=None, image=None):
         """Like :meth:`find_on_screen`, but return *every* match above threshold.
 
         Wraps :func:`yambot.screen.find_all_on_image` for repeated buttons (e.g.
@@ -93,10 +95,20 @@ class AutoMonstrator:
         strongest-first, all sharing the one screenshot; an empty list means
         nothing matched. Not a ``@step`` — it doesn't set ``last_step`` (there's
         no single result to act on with ``then_*``).
+
+        ``sort`` re-orders the returned list by screen position instead of match
+        strength: ``"y_asc"`` (topmost first), ``"y_desc"`` (bottommost first),
+        ``"x_asc"`` (leftmost first) or ``"x_desc"`` (rightmost first). ``None``
+        keeps the strongest-first order.
+
+        Pass ``image`` to match against an already-taken frame instead of
+        screenshotting afresh — handy for scanning several templates against one
+        screenshot.
         """
         log = structlog.get_logger(title, title=title, suffix=suffix)
         log.info("Step (all): %s", title)
-        image = screenshot()
+        if image is None:
+            image = screenshot()
 
         print("   Finding all templates...")
         with TinyProfiler("   Finding all images"):
@@ -111,11 +123,17 @@ class AutoMonstrator:
             for i, (x, y, w, h, score) in enumerate(matches)
         ]
 
+        if sort is not None:
+            axis, _, direction = sort.partition("_")
+            if axis not in ("x", "y") or direction not in ("asc", "desc"):
+                raise ValueError(f"Unknown sort {sort!r}; expected x/y _asc/_desc")
+            idx = 0 if axis == "x" else 1  # position is (x, y)
+            results.sort(key=lambda r: r.position[idx], reverse=(direction == "desc"))
+
         if self.annotate:
             annotated = image
             for x, y, w, h, score in matches:
                 annotated = mark_box(annotated, x, y, w, h)
-                annotated = mark_circle(annotated, x, y)
             save_to_folder(annotated, self.captures_dir, suffix=suffix + "_all")
 
         return results

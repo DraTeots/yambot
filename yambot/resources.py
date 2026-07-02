@@ -23,13 +23,22 @@ TEMPLATE_CONFIRM_BUTTON = TEMPLATES_DIR / "confirm_button.png"
 TEMPLATE_MAP_SEPARATOR: Path = TEMPLATES_DIR / "island_list_separator.png"
 #: The map button on an island that returns to the world map.
 TEMPLATE_MAP_BUTTON = TEMPLATES_DIR / "map_button.png"
+#: Alternate to the Go button: when the selected island is the one you're
+#: already on, the map shows a "you are here" button that enters it instead.
+TEMPLATE_MAP_YOU_HERE_BUTTON = TEMPLATES_DIR / "map_you_here_button.png"
 
 # --- Resource collection (key 5) ------------------------------------------
 # Markers the map list draws on an island's row when it has resources ready to
-# collect. We scan the island list for either; their absence is the signal that
-# an island has nothing waiting.
+# collect. We scan the island list for any of them; their absence is the signal
+# that an island has nothing waiting.
 TEMPLATE_MAP_HAS_CRYSTALS = TEMPLATES_DIR / "map_has_crystals.png"
 TEMPLATE_MAP_HAS_MONEY = TEMPLATES_DIR / "map_has_money.png"
+TEMPLATE_MAP_HAS_DIAMONDS = TEMPLATES_DIR / "map_has_diamonds.png"
+#: An island row showing several resource types at once (money + crystals etc.).
+TEMPLATE_MAP_HAS_MIXEDRES = TEMPLATES_DIR / "map_has_mixedres.png"
+#: On an island, the diamonds-collect button. Unlike collect-all it needs no
+#: confirmation dialog — pressing it collects straight away.
+TEMPLATE_ISL_COLLECT_DIAMONDS = TEMPLATES_DIR / "collect_diamonds.png"
 
 # --- Friends list ---------------------------------------------------------
 # The list pager has back/next buttons that share a shape per direction and

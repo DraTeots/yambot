@@ -18,6 +18,7 @@ class Key(Enum):
     K2 = "2"   # friends routine
     K3 = "3"   # advanced friends routine
     K5 = "5"   # collect resources routine
+    K6 = "6"   # combined friends lights routine (quick-light + fire)
     Q = "q"    # quit
     ESC = "esc"  # quit
 
@@ -29,5 +30,5 @@ class Key(Enum):
         The friends/map log lines used to print evdev's ``key_name`` output, so
         we mirror it here to keep that output unchanged.
         """
-        suffix = {Key.K1: "1", Key.K2: "2", Key.K3: "3", Key.K5: "5", Key.Q: "Q", Key.ESC: "ESC"}[self]
+        suffix = {Key.K1: "1", Key.K2: "2", Key.K3: "3", Key.K5: "5", Key.K6: "6", Key.Q: "Q", Key.ESC: "ESC"}[self]
         return f"KEY_{suffix}"

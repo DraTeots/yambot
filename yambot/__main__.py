@@ -17,8 +17,10 @@ from .resources import (
     TEMPLATE_FRIEND_LIGHT_ACTIVE, TEMPLATE_FRIEND_LIGHT_INACTIVE, TEMPLATE_FRIEND_LIGHT,
     TEMPLATE_FRIEND_MAP_CLOSE, TEMPLATE_FRIEND_ISLAND_BUTTON, TEMPLATE_GO_BUTTON,
     TEMPLATE_MAP_GO_TO_MAIN_WORLD,
-    TEMPLATE_ISL_CLOSE_BUTTON, TEMPLATE_MAP_BUTTON,
+    TEMPLATE_ISL_CLOSE_BUTTON, TEMPLATE_MAP_BUTTON, TEMPLATE_MAP_YOU_HERE_BUTTON,
     TEMPLATE_MAP_HAS_CRYSTALS, TEMPLATE_MAP_HAS_MONEY,
+    TEMPLATE_MAP_HAS_DIAMONDS, TEMPLATE_MAP_HAS_MIXEDRES,
+    TEMPLATE_ISL_COLLECT_DIAMONDS,
 )
 from .timer_cm import TinyProfiler
 
@@ -30,6 +32,7 @@ REPEAT_KEY = Key.K1
 FRIENDS_KEY = Key.K2
 ADVANCED_FRIENDS_KEY = Key.K3
 COLLECT_KEY = Key.K5
+COMBINED_FRIENDS_KEY = Key.K6
 QUIT_KEYS = (Key.Q, Key.ESC)
 
 #: Friends routine pacing. Generous waits — the game animates page turns and the
@@ -520,6 +523,46 @@ def run_advanced_friends(mouse: VirtualMouse):
     print(f"   Reached the {MAX_PAGES}-page cap — stopping.")
 
 
+# --- Combined friends (button 6): quick-light AND fire, in one sweep --------
+
+def process_combined_page(m: AutoMonstrator, served):
+    """Light every friend on the page by *both* methods, consecutively.
+
+    Fuses the two per-page routines into one pass: first clear all the
+    quick-lights (the fast, direct list torches — :func:`process_friends_page`),
+    then walk the remaining active fire-lights the long way, opening each
+    friend's map (:func:`process_advanced_page`). A friend's list button is
+    either a quick-light or a regular fire, so the two passes don't overlap;
+    running quick-lights first just gets the cheap ones out of the way before the
+    map round-trips. ``served`` is shared so an advanced map escape isn't retried.
+    """
+    process_friends_page(m)           # 1) all quick-lights on this page
+    process_advanced_page(m, served)  # 2) then the fires that need a map visit
+
+
+def run_combined_friends(mouse: VirtualMouse):
+    """Walk every friends page, lighting each friend by quick-light **and** fire.
+
+    Triggered by pressing **6** with the friends list open. Combines the quick
+    (key 2) and advanced (key 3) routines: rewind to the first page, then on each
+    page run both light passes consecutively (see :func:`process_combined_page`)
+    and advance until the pager runs out. One ``served`` fingerprint set spans the
+    whole run so friends reached via their map aren't revisited.
+    """
+    m = AutoMonstrator(mouse)
+    served = []  # portrait fingerprints of friends visited this run (see first_active_light)
+    print("=== Combined friends routine: rewinding to the first page ===")
+    rewind_friends_to_first_page(m)
+
+    for page in range(1, MAX_PAGES + 1):
+        print(f"=== Combined friends page {page} ===")
+        process_combined_page(m, served)
+        if not advance_to_next_page(m):
+            print("   All pages processed. Done.")
+            return
+    print(f"   Reached the {MAX_PAGES}-page cap — stopping.")
+
+
 
 # --- Collect resources (button 5): sweep the map for crystals/money ---------
 
@@ -534,6 +577,7 @@ COLLECT_SELECT_WAIT = 3.0     # after clicking a marker, before the Go button sh
 COLLECT_GO_WAIT = 8.0         # after Go, while the island loads (per spec)
 COLLECT_DIALOG_WAIT = 2.0     # after collect-all, before the confirm dialog appears
 COLLECT_CONFIRM_WAIT = 4.0    # after confirm, before pressing the map button (per spec)
+COLLECT_DIAMONDS_WAIT = 2.0   # let the coin-collect animation clear so the diamonds button shows
 COLLECT_MAP_WAIT = 10.0       # after the map button, while the world map redraws (per spec)
 COLLECT_POPUP_WAIT = 1.0      # after closing a promo popup, before re-checking
 
@@ -543,20 +587,37 @@ COLLECT_MAX_POPUPS = 5
 MAX_COLLECT_ISLANDS = 40
 
 
-def find_resource_marker(m: AutoMonstrator):
-    """Look in the *current* map view for an island with resources ready.
+#: Map-row markers meaning "this island has something to collect", each paired
+#: with a label/suffix for logging. We scan for all of them and act on whichever
+#: sits highest on screen.
+COLLECT_MARKERS = (
+    (TEMPLATE_MAP_HAS_CRYSTALS, "Map has crystals", "has_crystals"),
+    (TEMPLATE_MAP_HAS_MONEY, "Map has money", "has_money"),
+    (TEMPLATE_MAP_HAS_DIAMONDS, "Map has diamonds", "has_diamonds"),
+    (TEMPLATE_MAP_HAS_MIXEDRES, "Map has mixed resources", "has_mixedres"),
+)
 
-    Glance for the crystals marker, then the money marker; return the first
-    FindStep that lands, or None if neither is in view. No scrolling here — the
-    caller drives the scroll-and-rescan loop.
+
+def find_resource_marker(m: AutoMonstrator):
+    """Find the topmost island with resources ready in the *current* map view.
+
+    Scan for every collect marker and return the one highest on screen (smallest
+    y), or None if none is in view. Going top-down matters: after collecting we
+    come back to the map and re-scan, so if we acted on a lower marker first we'd
+    scroll past — and skip — any that sit above it. No scrolling here; the caller
+    drives the scroll-and-rescan loop.
     """
-    crystals = m.find_on_screen(TEMPLATE_MAP_HAS_CRYSTALS, "Map has crystals", "has_crystals")
-    if crystals:
-        return crystals
-    money = m.find_on_screen(TEMPLATE_MAP_HAS_MONEY, "Map has money", "has_money")
-    if money:
-        return money
-    return None
+    # One screenshot, matched against every marker template — no need to grab a
+    # fresh frame per type.
+    frame = screenshot()
+    candidates = []
+    for template, title, suffix in COLLECT_MARKERS:
+        candidates.extend(m.find_all_on_screen(template, title, suffix, image=frame))
+    if not candidates:
+        return None
+    # Across all marker types, pick the one highest on screen.
+    candidates.sort(key=lambda r: r.position[1])
+    return candidates[0]
 
 
 def close_island_popups(m: AutoMonstrator) -> bool:
@@ -590,12 +651,16 @@ def collect_from_island(m: AutoMonstrator, marker) -> bool:
     m.click_on_found(marker)
     time.sleep(COLLECT_SELECT_WAIT)
 
-    # Same Go button (and action) as the friends flow — press it to enter.
-    go = m.find_on_screen(TEMPLATE_GO_BUTTON, "Go button", "collect_go")
-    if not go:
-        print("   No Go button after selecting the marker — skipping this island.")
+    # Press whatever enters the island: the Go button (same one the friends flow
+    # uses), or — if the selected island is the one we're already on — the
+    # "you are here" button. Either one proceeds.
+    enter = m.find_on_screen(TEMPLATE_GO_BUTTON, "Go button", "collect_go")
+    if not enter:
+        enter = m.find_on_screen(TEMPLATE_MAP_YOU_HERE_BUTTON, "You-are-here button", "collect_here")
+    if not enter:
+        print("   No Go / you-are-here button after selecting the marker — skipping this island.")
         return False
-    m.click_on_found(go)
+    m.click_on_found(enter)
     time.sleep(COLLECT_GO_WAIT)
 
     # The island may open with promotion popups on top — clear them first.
@@ -616,6 +681,18 @@ def collect_from_island(m: AutoMonstrator, marker) -> bool:
             print("   No confirm dialog after collect-all — heading back anyway.")
     else:
         print("   No collect-all button on this island — heading back anyway.")
+
+    # Diamonds collect separately, with their own button and no confirm dialog.
+    # Always check before leaving: let the coin-collect animation settle first
+    # (otherwise the button can still be hidden), then press it if it's there.
+    time.sleep(COLLECT_DIAMONDS_WAIT)
+    diamonds = m.find_on_screen(TEMPLATE_ISL_COLLECT_DIAMONDS, "Collect diamonds", "collect_diamonds", threshold=0.73)
+    if diamonds:
+        print("   Collecting diamonds...")
+        m.click_on_found(diamonds)
+        time.sleep(COLLECT_DIALOG_WAIT)
+    else:
+        print("   No diamonds to collect on this island.")
 
     # Back to the world map for the next island.
     map_btn = m.find_on_screen(TEMPLATE_MAP_BUTTON, "Map button", "collect_map")
@@ -675,8 +752,8 @@ def main():
 
     with VirtualMouse() as mouse:
         while True:
-            print("\npress [1] map, [2] friends, [3] advanced friends, [5] collect resources, [q]/[esc] to quit — listening...")
-            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, ADVANCED_FRIENDS_KEY, COLLECT_KEY, *QUIT_KEYS), log=print)
+            print("\npress [1] map, [2] friends, [3] advanced friends, [6] combined friends, [5] collect resources, [q]/[esc] to quit — listening...")
+            pressed = wait_for_keys((REPEAT_KEY, FRIENDS_KEY, ADVANCED_FRIENDS_KEY, COLLECT_KEY, COMBINED_FRIENDS_KEY, *QUIT_KEYS), log=print)
             if pressed is None:
                 print("no keyboards found to read — quitting")
                 break
@@ -692,6 +769,9 @@ def main():
             elif pressed == COLLECT_KEY:
                 print(f"{key_name(pressed)} pressed — running collect resources routine")
                 run_collect_resources(mouse)
+            elif pressed == COMBINED_FRIENDS_KEY:
+                print(f"{key_name(pressed)} pressed — running combined friends routine")
+                run_combined_friends(mouse)
             else:
                 print(f"{key_name(pressed)} pressed — running map")
                 run_map(mouse)
